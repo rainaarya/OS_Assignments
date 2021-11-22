@@ -2,13 +2,9 @@
 
 int main()
 {
-    int arr[3][3] = {
-        {1, 2, 3},
-        {4, 5, 6},
-        {7, 8, 9}
+    float matrix[2][2] = {
+        {1.0f, 2.0f},
+        {3.0f, 4.0f}
     };
 
-    int *ptr;
-    ptr=arr;
-    printf("%d\n", *(ptr+3));
 }
