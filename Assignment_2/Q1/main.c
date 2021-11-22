@@ -16,9 +16,6 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
-/* pid_t child_st_pid;
-pid_t child_sr_pid; */
-
 int *child_st_pid;
 int *child_sr_pid;
 
@@ -33,37 +30,21 @@ void sig_handler(int signum, siginfo_t *siginfo, void *extra)
     {
         int num = siginfo->si_value.sival_int;
         char buffer[1000];
-        snprintf(buffer, sizeof(buffer), "SIGTERM Received and Random Number is %d\n", num);
+        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E1 and Random Number is %d\n", num);
         write(STDOUT_FILENO, buffer, strlen(buffer));
         
     }
     else if (sender_pid == *child_st_pid)
     {
-        /* int num = siginfo->si_value.sival_int;
-        char buffer[1000];
-        snprintf(buffer, sizeof(buffer), "SIGTERM Received and CPU Clock Cycle Time is %d\n", num);
-        write(STDOUT_FILENO, buffer, strlen(buffer));
-        fflush(stdout); */
-
-        // ftok to generate unique key
+        
         key_t key = ftok("shmfile", 65);
-
-        // shmget returns an identifier in shmid
         int shmid = shmget(key, 1024, 0666 | IPC_CREAT);
-
-        // shmat to attach to shared memory
         char *str = (char *)shmat(shmid, (void *)0, 0);
 
         char buffer[1000];
-        snprintf(buffer, sizeof(buffer), "SIGTERM Received and CPU Clock Cycle Time is: ");
-        write(STDOUT_FILENO, buffer, strlen(buffer));
-        write(STDOUT_FILENO, str, strlen(str));
-        // write \n
-        write(STDOUT_FILENO, "\n", 1);
-        
+        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E2 and Current Date and Time is: %s\n", str);
+        write(STDOUT_FILENO, buffer, strlen(buffer));  
 
-
-        //detach from shared memory
         shmdt(str);
     }
     else
@@ -99,35 +80,37 @@ int main()
         // now create two child processes from parent
         pid_t st, sr;
 
-        st = fork();
+        sr = fork();
 
-        if (st == 0)
+        if (sr == 0)
         {
-            /* Child A code */
-            *child_st_pid = getpid();
-            //printf("Child ST PID is %d\n", child_st_pid);
+            /* Child SR code */
+
+            *child_sr_pid = getpid(); // store pid of sr child
+           
             char pid_char[50];
             snprintf(pid_char, sizeof(pid_char), "%d", pid_s1);
-            char *args[] = {"./ST", pid_char, NULL};
-            execv(args[0], args);
+            char *args[] = {"./E1", pid_char, NULL};    // pass pid of s1 child to E1
+            execv(args[0], args);   // execute E1
         }
         else
         {
-            sr = fork();
+            st = fork();
 
-            if (sr == 0)
+            if (st == 0)
             {
-                /* Child B code */
-                *child_sr_pid = getpid();
-                //printf("Child SR PID is %d\n", child_sr_pid);
+                /* Child ST code */
+
+                *child_st_pid = getpid();   // store pid of st child
+                
                 char pid_char[50];
                 snprintf(pid_char, sizeof(pid_char), "%d", pid_s1);
-                char *args[] = {"./SR", pid_char, NULL};
-                execv(args[0], args);
+                char *args[] = {"./E2", pid_char, NULL};    // pass pid of s1 child to E2
+                execv(args[0], args);   // execute E2
             }
             else
             {
-                /* Parent Code */
+                /* Main.c Parent Code */
             }
         }
     }
