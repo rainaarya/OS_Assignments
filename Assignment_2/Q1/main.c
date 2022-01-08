@@ -28,21 +28,21 @@ void sig_handler(int signum, siginfo_t *siginfo, void *extra)
 
     if (sender_pid == *child_sr_pid)
     {
-        int num = siginfo->si_value.sival_int;
+        unsigned int num = (unsigned int) siginfo->si_value.sival_int;
         char buffer[1000];
-        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E1 and Random Number is %d\n", num);
+        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E1 and Random Number is %u\n", num);
         write(STDOUT_FILENO, buffer, strlen(buffer));
         
     }
     else if (sender_pid == *child_st_pid)
     {
         
-        key_t key = ftok("shmfile", 65);
+        key_t key = ftok("shmtime", 65);
         int shmid = shmget(key, 1024, 0666 | IPC_CREAT);
         char *str = (char *)shmat(shmid, (void *)0, 0);
 
         char buffer[1000];
-        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E2 and Current Date and Time is: %s\n", str);
+        snprintf(buffer, sizeof(buffer), "SIGTERM Received from E2 and time elapsed since last CPU Reset is: %s\n", str);
         write(STDOUT_FILENO, buffer, strlen(buffer));  
 
         shmdt(str);
@@ -105,7 +105,7 @@ int main()
                 
                 char pid_char[50];
                 snprintf(pid_char, sizeof(pid_char), "%d", pid_s1);
-                char *args[] = {"./E2", pid_char, NULL};    // pass pid of s1 child to E2
+                char *args[] = {"./E2", pid_char, NULL};    // pass pid of S1 child to E2
                 execv(args[0], args);   // execute E2
             }
             else

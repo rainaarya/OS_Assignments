@@ -1,0 +1,182 @@
+diff -u -r linux-5.14.6/arch/x86/entry/syscalls/syscall_64.tbl linux-5.14.6-A4/arch/x86/entry/syscalls/syscall_64.tbl
+--- linux-5.14.6/arch/x86/entry/syscalls/syscall_64.tbl	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A4/arch/x86/entry/syscalls/syscall_64.tbl	2022-01-03 20:13:48.642454716 +0400
+@@ -369,6 +369,10 @@
+ 445	common	landlock_add_rule	sys_landlock_add_rule
+ 446	common	landlock_restrict_self	sys_landlock_restrict_self
+ 447	common	memfd_secret		sys_memfd_secret
++448	common	kernel_2d_memcpy        sys_kernel_2d_memcpy
++449	common	change_vruntime         sys_change_vruntime
++450	common	writer                  sys_writer
++451	common	reader                  sys_reader
+ 
+ #
+ # Due to a historical design error, certain syscalls are numbered differently
+diff -u -r linux-5.14.6/include/linux/sched.h linux-5.14.6-A4/include/linux/sched.h
+--- linux-5.14.6/include/linux/sched.h	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A4/include/linux/sched.h	2021-12-14 18:11:52.987053885 +0400
+@@ -475,6 +475,7 @@
+ 	u64				prev_sum_exec_runtime;
+ 
+ 	u64				nr_migrations;
++	u64 				delaytime;
+ 
+ 	struct sched_statistics		statistics;
+ 
+diff -u -r linux-5.14.6/kernel/sched/core.c linux-5.14.6-A4/kernel/sched/core.c
+--- linux-5.14.6/kernel/sched/core.c	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A4/kernel/sched/core.c	2021-12-14 18:15:58.607054301 +0400
+@@ -3956,6 +3956,7 @@
+ 	p->se.prev_sum_exec_runtime	= 0;
+ 	p->se.nr_migrations		= 0;
+ 	p->se.vruntime			= 0;
++	p->se.delaytime			= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+diff -u -r linux-5.14.6/kernel/sched/fair.c linux-5.14.6-A4/kernel/sched/fair.c
+--- linux-5.14.6/kernel/sched/fair.c	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A4/kernel/sched/fair.c	2021-12-14 17:58:50.697052562 +0400
+@@ -812,6 +812,7 @@
+ 	schedstat_add(cfs_rq->exec_clock, delta_exec);
+ 
+ 	curr->vruntime += calc_delta_fair(delta_exec, curr);
++	curr->vruntime += curr->delaytime;
+ 	update_min_vruntime(cfs_rq);
+ 
+ 	if (entity_is_task(curr)) {
+diff -u -r linux-5.14.6/kernel/sys.c linux-5.14.6-A4/kernel/sys.c
+--- linux-5.14.6/kernel/sys.c	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A4/kernel/sys.c	2022-01-03 20:12:23.022454709 +0400
+@@ -61,6 +61,10 @@
+ #include <linux/rcupdate.h>
+ #include <linux/uidgid.h>
+ #include <linux/cred.h>
++//include semaphore.h
++#include <linux/semaphore.h>
++
++
+ 
+ #include <linux/nospec.h>
+ 
+@@ -154,6 +158,44 @@
+ EXPORT_SYMBOL(fs_overflowuid);
+ EXPORT_SYMBOL(fs_overflowgid);
+ 
++//make a queue that stores integers and has a maximum size with the help of kmalloc
++
++unsigned long *buffer_queue = NULL;
++struct semaphore empty;
++struct semaphore full;
++int in = 0;
++int out = 0;
++struct semaphore mutex;
++
++static void enqueue(unsigned long item)
++{
++    down(&empty);
++    down(&mutex);
++
++    buffer_queue[in] = item;
++    printk(KERN_INFO "Producer produced item: %lu\n", item);
++    in = (in + 1) % 5; // 5 is the size of the buffer
++
++    up(&mutex);
++    up(&full);
++}
++
++static unsigned long dequeue(void)
++{
++	unsigned long item;
++    down(&full);
++    down(&mutex);
++
++	item=buffer_queue[out];
++    printk(KERN_INFO "Consumer consumed item: %lu\n", item);
++    out = (out + 1) % 5;
++
++    up(&mutex);
++    up(&empty);
++
++    return item;
++}
++
+ /*
+  * Returns true if current's euid is same as p's uid or euid,
+  * or has CAP_SYS_NICE to p's user_ns.
+@@ -200,6 +242,75 @@
+ 	return error;
+ }
+ 
++SYSCALL_DEFINE1(writer, unsigned long, item)
++{
++    if(buffer_queue == NULL)
++    {
++        buffer_queue = (unsigned long *)kmalloc(5 * sizeof(unsigned long), GFP_KERNEL);
++        sema_init(&empty, 5);
++		sema_init(&full, 0);
++		sema_init(&mutex, 1);
++        printk(KERN_INFO "Buffer queue created and semaphores intialised by writer\n");
++    }
++    enqueue(item);
++    return 0;
++}
++SYSCALL_DEFINE0(reader)
++{
++	unsigned long val;
++    if(buffer_queue == NULL)
++    {
++        buffer_queue = (unsigned long *)kmalloc(5 * sizeof(unsigned long), GFP_KERNEL);
++        sema_init(&empty, 5);
++		sema_init(&full, 0);
++		sema_init(&mutex, 1);
++        printk(KERN_INFO "Buffer queue created and semaphores intialised by reader\n");
++    }
++    val=dequeue();
++    return val;
++}
++
++
++SYSCALL_DEFINE2(change_vruntime, pid_t, pid_val, long, delta)
++{
++	struct task_struct *p;
++	struct pid *pid_struct;
++
++	pid_struct=find_get_pid(pid_val);
++	p=pid_task(pid_struct,PIDTYPE_PID);
++	p->se.delaytime += delta*(1000000);
++
++
++	return 0;
++}
++
++SYSCALL_DEFINE4(kernel_2d_memcpy, float *, dst, float *, src, int, rows, int, cols)
++{
++  int i, j;
++  for (i = 0; i < rows; i++)
++  {
++    for (j = 0; j < cols; j++)
++    {
++      float val;
++      if (__copy_from_user(&val, src, sizeof(float)))
++      {
++        printk(KERN_INFO "Error copying from user space!\n");
++        return -1;
++      }
++      if (__copy_to_user(dst, &val, sizeof(float)))
++      {
++        printk(KERN_INFO "Error copying to user space!\n");
++        return -1;
++      }
++      src++;
++      dst++;
++    }
++  }
++
++  printk(KERN_INFO "Successfully Copied Source Matrix to Destination Matrix!\n");
++  return 0;
++}
++
+ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ {
+ 	struct task_struct *g, *p;

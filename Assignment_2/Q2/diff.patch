@@ -1,0 +1,48 @@
+diff -u -r linux-5.14.6/arch/x86/entry/syscalls/syscall_64.tbl linux-5.14.6-A2/arch/x86/entry/syscalls/syscall_64.tbl
+--- linux-5.14.6/arch/x86/entry/syscalls/syscall_64.tbl	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A2/arch/x86/entry/syscalls/syscall_64.tbl	2021-11-19 22:26:05.637033872 +0400
+@@ -369,6 +369,7 @@
+ 445	common	landlock_add_rule	sys_landlock_add_rule
+ 446	common	landlock_restrict_self	sys_landlock_restrict_self
+ 447	common	memfd_secret		sys_memfd_secret
++448	common	kernel_2d_memcpy        sys_kernel_2d_memcpy
+ 
+ #
+ # Due to a historical design error, certain syscalls are numbered differently
+diff -u -r linux-5.14.6/kernel/sys.c linux-5.14.6-A2/kernel/sys.c
+--- linux-5.14.6/kernel/sys.c	2021-09-18 15:44:05.000000000 +0400
++++ linux-5.14.6-A2/kernel/sys.c	2021-11-22 01:36:27.993710176 +0400
+@@ -200,6 +200,33 @@
+ 	return error;
+ }
+ 
++SYSCALL_DEFINE4(kernel_2d_memcpy, float *, dst, float *, src, int, rows, int, cols)
++{
++  int i, j;
++  for (i = 0; i < rows; i++)
++  {
++    for (j = 0; j < cols; j++)
++    {
++      float val;
++      if (__copy_from_user(&val, src, sizeof(float)))
++      {
++        printk(KERN_INFO "Error copying from user space!\n");
++        return -1;
++      }
++      if (__copy_to_user(dst, &val, sizeof(float)))
++      {
++        printk(KERN_INFO "Error copying to user space!\n");
++        return -1;
++      }
++      src++;
++      dst++;
++    }
++  }
++
++  printk(KERN_INFO "Successfully Copied Source Matrix to Destination Matrix!\n");
++  return 0;
++}
++
+ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ {
+ 	struct task_struct *g, *p;
