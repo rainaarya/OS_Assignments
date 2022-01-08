@@ -14,7 +14,6 @@ B:
 	mov rbp, rsp   ; rbp = rsp
 	push rdi
 
-	
 	mov rax, 1
 	mov rdi, 1
 	mov rsi, text
